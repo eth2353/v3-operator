@@ -2,6 +2,7 @@ import logging
 import struct
 from typing import Set
 
+import web3.exceptions
 from eth_typing import BlockNumber, HexStr
 from multiproof.standard import MultiProof
 from sw_utils import EventProcessor, is_valid_deposit_data_signature
@@ -309,14 +310,35 @@ async def register_multiple_validator(
         multi_proof.proof_flags,
         multi_proof.proof,
     ]
-    if update_state_call is not None:
-        register_call = vault_contract.encode_abi(
-            fn_name='registerValidators',
-            args=register_call_args,
-        )
-        tx = await vault_contract.functions.multicall([update_state_call, register_call]).transact()
-    else:
-        tx = await vault_contract.functions.registerValidators(*register_call_args).transact()
+    try:
+        if update_state_call is not None:
+            register_call = vault_contract.encode_abi(
+                fn_name='registerValidators',
+                args=register_call_args,
+            )
+            tx = await vault_contract.functions.multicall(
+                [update_state_call, register_call]
+            ).transact()
+        else:
+            tx = await vault_contract.functions.registerValidators(*register_call_args).transact()
+    except web3.exceptions.ContractCustomError as e:
+        for revert_reason in (
+            'DeadlineExpired',
+            'InvalidValidatorsRegistryRoot',
+            'AccessDenied',
+            'InvalidOracle',
+            'InvalidOracles',
+            'NotEnoughSignatures',
+            'InvalidValidators',
+            'InvalidProof',
+        ):
+            log_msg = f'Register call arguments: {register_call_args}'
+            logger.error(log_msg)
+            if Web3.keccak(text=f'{revert_reason}()').hex()[:10] == e.message:
+                raise web3.exceptions.ContractCustomError(revert_reason, data=revert_reason) from e
+
+        logger.error('Unable to match error data %s to revert reason', e.data)
+        raise e
 
     logger.info('Waiting for transaction %s confirmation', Web3.to_hex(tx))
     await execution_client.eth.wait_for_transaction_receipt(tx, timeout=300)
