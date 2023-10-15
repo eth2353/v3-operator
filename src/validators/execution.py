@@ -304,7 +304,8 @@ async def register_multiple_validator(
             b''.join(tx_validators),
             approval.signatures,
             approval.ipfs_hash,
-            approval.deadline,
+            # deadline twice - likely a different bug?
+            # approval.deadline,
         ),
         indexes,
         multi_proof.proof_flags,
@@ -332,8 +333,6 @@ async def register_multiple_validator(
             'InvalidValidators',
             'InvalidProof',
         ):
-            log_msg = f'Register call arguments: {register_call_args}'
-            logger.error(log_msg)
             if Web3.keccak(text=f'{revert_reason}()').hex()[:10] == e.message:
                 raise web3.exceptions.ContractCustomError(revert_reason, data=revert_reason) from e
 
